@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: gs2
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  config:
+    import: optional:file:./config/.env-${spring.profiles.active}[.properties]
+  datasource:
+    url: ${ORACLE_DB_URL}
+    username: ${ORACLE_DB_USERNAME}
+    password: ${ORACLE_DB_PASSWORD}
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      pool-name: gs2-oracle-pool
+      maximum-pool-size: ${ORACLE_DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${ORACLE_DB_POOL_MIN_IDLE:2}
+      connection-timeout: ${ORACLE_DB_CONNECTION_TIMEOUT:30000}
