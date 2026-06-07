@@ -13,16 +13,20 @@ import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.LocalDate;
 import java.util.Objects;
 
 @Component
 public class DataUtil {
 
     public static final String TIPO_CONTEUDO = "AREA_PROTEGIDA";
+    public static final String TIPO_CONTEUDO_DESMATAMENTO = "DESMATAMENTO";
     public static final String STATUS_PROCESSADO = "PROCESSADO";
     public static final String STATUS_ERRO = "ERRO";
     public static final String AREA_PROTEGIDA_ATIVA = "S";
+    public static final String AREA_DESMATAMENTO_ATIVO = "S";
     public static final String AREA_RESTRITA = "S";
+    public static final CoordinateReferenceSystem DATA_CRS = decodeDataCrs();
     public static final CoordinateReferenceSystem AREA_CRS = decodeAreaCrs();
 
     @Autowired
@@ -50,6 +54,14 @@ public class DataUtil {
         }
     }
 
+    public static void setNullableDate(PreparedStatement ps, int index, LocalDate value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.DATE);
+        } else {
+            ps.setDate(index, java.sql.Date.valueOf(value));
+        }
+    }
+
     public static void setClob(PreparedStatement ps, int index, String value) throws SQLException {
         Reader reader = new StringReader(value);
         ps.setClob(index, reader, value.length());
@@ -60,6 +72,14 @@ public class DataUtil {
             return CRS.decode("EPSG:5880", true);
         } catch (Exception ex) {
             throw new IllegalStateException("Nao foi possivel carregar EPSG:5880 para calculo de area", ex);
+        }
+    }
+
+    private static CoordinateReferenceSystem decodeDataCrs() {
+        try {
+            return CRS.decode("EPSG:4674", true);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Nao foi possivel carregar EPSG:4674 para armazenamento de geometria", ex);
         }
     }
 }

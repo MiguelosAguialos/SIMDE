@@ -44,8 +44,8 @@ public class ReadConservationAreaFiles extends DataUtil {
             ConservationAreaDao conservationAreaDao,
             TypeAreaDao typeAreaDao,
             DadoOrigemDao dadoOrigemDao,
-            @Value("${input.directory:input}") String inputDirectory,
-            @Value("${conservation-area.import-on-startup:true}") boolean importOnStartup) {
+            @Value("${input.directory:input/areas_conservacao}") String inputDirectory,
+            @Value("${conservation-area.import-on-startup:false}") boolean importOnStartup) {
         this.conservationAreaDao = conservationAreaDao;
         this.typeAreaDao = typeAreaDao;
         this.dadoOrigemDao = dadoOrigemDao;
@@ -85,7 +85,7 @@ public class ReadConservationAreaFiles extends DataUtil {
         var idArquivo = dadoOrigemDao.upsertDadoOrigem(nomeArquivo, hashArquivo);
 
         try {
-//            conservationAreaDao.deleteAreaProtegida(idArquivo);
+            conservationAreaDao.deleteAreaProtegida(idArquivo);
             importFeatures(shapefile, idArquivo);
             jdbcTemplate.update(
                     "UPDATE DADO_ORIGEM SET status_processamento = ?, processado_em = SYSTIMESTAMP WHERE id_arquivo = ?",
@@ -116,8 +116,8 @@ public class ReadConservationAreaFiles extends DataUtil {
                 while (iterator.hasNext()) {
                     SimpleFeature feature = iterator.next();
                     var area = ConservationArea.from(feature, schema, areaTransform);
-//                    var idTipoArea = typeAreaDao.findOrCreateTipoArea(area.tipoArea());
-//                    conservationAreaDao.insertAreaProtegida(idArquivo, idTipoArea, area);
+                    var idTipoArea = typeAreaDao.findOrCreateTipoArea(area.tipoArea());
+                    conservationAreaDao.insertAreaProtegida(idArquivo, idTipoArea, area);
                 }
             }
         } finally {

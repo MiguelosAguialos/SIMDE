@@ -6,6 +6,10 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class DadoOrigemDao extends DataUtil {
     public long upsertDadoOrigem(String nomeArquivo, long hashArquivo) {
+        return upsertDadoOrigem(nomeArquivo, hashArquivo, TIPO_CONTEUDO);
+    }
+
+    public long upsertDadoOrigem(String nomeArquivo, long hashArquivo, String tipoConteudo) {
         Long existingId = jdbcTemplate.query(
                 "SELECT id_arquivo FROM DADO_ORIGEM WHERE nome_arquivo = ?",
                 rs -> rs.next() ? rs.getLong("id_arquivo") : null,
@@ -21,7 +25,7 @@ public class DadoOrigemDao extends DataUtil {
                            processado_em = SYSTIMESTAMP
                      WHERE id_arquivo = ?
                     """,
-                    TIPO_CONTEUDO,
+                    tipoConteudo,
                     hashArquivo,
                     "PROCESSANDO",
                     existingId);
@@ -38,7 +42,7 @@ public class DadoOrigemDao extends DataUtil {
                 """,
                 idArquivo,
                 nomeArquivo,
-                TIPO_CONTEUDO,
+                tipoConteudo,
                 hashArquivo,
                 "PROCESSANDO");
         return idArquivo;
