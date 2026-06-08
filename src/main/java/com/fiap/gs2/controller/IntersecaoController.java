@@ -1,5 +1,7 @@
 package com.fiap.gs2.controller;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fiap.gs2.dao.IntersecaoDao;
 import com.fiap.gs2.dto.IntersecaoDto;
@@ -20,7 +22,7 @@ import java.util.Map;
 public class IntersecaoController {
 
     private final IntersecaoDao intersecaoDao;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().enable(JsonParser.Feature.ALLOW_LEADING_DECIMAL_POINT_FOR_NUMBERS);
 
     public IntersecaoController(IntersecaoDao intersecaoDao) {
         this.intersecaoDao = intersecaoDao;
@@ -38,9 +40,9 @@ public class IntersecaoController {
 
         for (IntersecaoDto i : intersecoes) {
             Map<String, Object> feature = new LinkedHashMap<>();
-            feature.put("type", "Feature");
-            feature.put("geometry", i.geojson() == null ? null : objectMapper.readTree(i.geojson()));
-
+            JsonNode geojson = objectMapper.readTree(i.geojson());
+            feature.put("type", geojson.get("type").asText());
+            feature.put("coordinates", i.geojson() == null ? null : objectMapper.readValue(geojson.get("coordinates").toString(), Object.class));
             Map<String, Object> props = new LinkedHashMap<>();
             props.put("id", i.id());
             props.put("codigoDesmatamento", i.codigoDesmatamento());
