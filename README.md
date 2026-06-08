@@ -1,31 +1,78 @@
-# Diagrama Entidade-Relacionamento
+# SIMDE — Monitoramento de Desmatamento em Áreas Protegidas
 
-Sistema para processar arquivos GeoJSON de áreas protegidas/restritas e áreas de desmatamento ativo, processar os dados com Java/Spring, calcular intersecoes espaciais e registrar alertas de desmatamento ilegal.
+Projeto da Global Solution (FIAP, Engenharia de Software). O sistema cruza
+**alertas de desmatamento** por satélite com os **limites de áreas protegidas**
+(Unidades de Conservação federais do ICMBio e Terras Indígenas da FUNAI),
+identifica as **interseções** — desmatamento ocorrendo dentro de área protegida —
+e expõe o resultado em uma API para visualização em mapa.
 
-Banco de dados alvo: Oracle Database com Oracle Spatial  
-Backend: Java / Spring Boot  
-Frontend: React  
-Entrada de dados: arquivos GeoJSON locais ou internos ao projeto
+A interseção é o produto: ela é o indício de desmatamento potencialmente ilegal
+dentro de uma área protegida, pronto para fiscalização.
 
-## Diagrama ER
+---
+
+## Stack
+
+| Camada | Tecnologia |
+|---|---|
+| Linguagem | Java 21 |
+| Framework | Spring Boot 4.0.6 (Web MVC + JDBC / `JdbcTemplate`) |
+| Banco | Oracle Database + Oracle Spatial (`SDO_GEOMETRY`) |
+| Driver | `ojdbc11` |
+| Leitura de arquivos geo | GeoTools 31.2 (leitura de Shapefile e GeoPackage na ingestão) |
+| Pool de conexão | HikariCP |
+| Front-end | React + Leaflet (consome a API de interseções) |
+
+---
+
+## Arquitetura
+
+```
+Arquivos geo (Shapefile / GeoPackage)
+        │  (ingestão — GeoTools lê e converte para WKT)
+        ▼
+┌──────────────────────────────┐
+│  Spring Boot (Java)          │
+│  - Ingestão das áreas        │  ── grava geometrias no Oracle (SRID 4674)
+│  - Materialização da         │
+│    interseção (Oracle Spatial)│
+│  - API REST (GeoJSON)        │
+└───────────┬──────────────────┘
+            │ JDBC
+            ▼
+┌──────────────────────────────┐
+│  Oracle + Oracle Spatial     │
+│  - Geometrias em SIRGAS 2000 │
+│  - Cruzamento espacial        │
+│    (SDO_ANYINTERACT /         │
+│     SDO_INTERSECTION)         │
+└──────────────────────────────┘
+            ▲ GET /api/intersecoes (GeoJSON em 4326)
+            │
+        React + Leaflet
+```
+
+- As geometrias são armazenadas em **SIRGAS 2000 (SRID 4674)**.
+- O cruzamento espacial roda no Oracle. O resultado é **pré-processado**:
+  no startup a aplicação materializa as interseções na tabela `AREA_INTERSECAO`,
+  já com o GeoJSON em **WGS84 (SRID 4326)** pronto para o Leaflet.
+- O front consome um único endpoint e não fala com o banco diretamente.
+
+---
+
+## Modelo de Dados
+
+Cinco tabelas. Áreas protegidas, áreas de desmatamento e a interseção entre elas
+formam o núcleo; `DADO_ORIGEM` registra os arquivos processados e
+`TIPO_AREA_PROTEGIDA` classifica as áreas.
 
 ```mermaid
 erDiagram
     DADO_ORIGEM ||--o{ AREA_PROTEGIDA : contem
     DADO_ORIGEM ||--o{ AREA_DESMATAMENTO : contem
-
     TIPO_AREA_PROTEGIDA ||--o{ AREA_PROTEGIDA : classifica
-
-    AREA_PROTEGIDA ||--o{ INTERSECAO_DESMATAMENTO : intercepta
-    AREA_DESMATAMENTO ||--o{ INTERSECAO_DESMATAMENTO : cruza
-
-    AREA_PROTEGIDA ||--o{ ALERTA_DESMATAMENTO_ILEGAL : gera
-    AREA_DESMATAMENTO ||--o{ ALERTA_DESMATAMENTO_ILEGAL : origina
-    INTERSECAO_DESMATAMENTO ||--|| ALERTA_DESMATAMENTO_ILEGAL : fundamenta
-
-    STATUS_ALERTA ||--o{ ALERTA_DESMATAMENTO_ILEGAL : define
-    ALERTA_DESMATAMENTO_ILEGAL ||--o{ HISTORICO_ALERTA : possui
-    STATUS_ALERTA ||--o{ HISTORICO_ALERTA : registra
+    AREA_DESMATAMENTO ||--o{ AREA_INTERSECAO : origina
+    AREA_PROTEGIDA ||--o{ AREA_INTERSECAO : intercepta
 
     DADO_ORIGEM {
         NUMBER id_arquivo PK
@@ -38,7 +85,7 @@ erDiagram
 
     TIPO_AREA_PROTEGIDA {
         NUMBER id_tipo_area PK
-        VARCHAR2 nome UK
+        VARCHAR2 nome
         VARCHAR2 descricao
         CHAR restrita
     }
@@ -76,141 +123,116 @@ erDiagram
         TIMESTAMP atualizado_em
     }
 
-    INTERSECAO_DESMATAMENTO {
+    AREA_INTERSECAO {
         NUMBER id_intersecao PK
         NUMBER id_area_desmatamento FK
         NUMBER id_area_protegida FK
+        VARCHAR2 codigo_desmatamento
+        VARCHAR2 codigo_conservacao
+        VARCHAR2 nome_conservacao
+        VARCHAR2 categoria
+        VARCHAR2 municipio
+        VARCHAR2 uf
         NUMBER area_intersecao_ha
-        NUMBER percentual_desmatamento
-        NUMBER percentual_area_protegida
-        SDO_GEOMETRY geometria_intersecao
+        CLOB geojson_intersecao
         TIMESTAMP calculado_em
     }
-
-    ALERTA_DESMATAMENTO_ILEGAL {
-        NUMBER id_alerta PK
-        NUMBER id_area_desmatamento FK
-        NUMBER id_area_protegida FK
-        NUMBER id_intersecao FK
-        NUMBER id_status FK
-        VARCHAR2 nivel_risco
-        VARCHAR2 motivo_alerta
-        NUMBER area_ilegal_ha
-        DATE data_deteccao
-        TIMESTAMP gerado_em
-        TIMESTAMP atualizado_em
-    }
-
-    STATUS_ALERTA {
-        NUMBER id_status PK
-        VARCHAR2 nome UK
-        VARCHAR2 descricao
-    }
-
-    HISTORICO_ALERTA {
-        NUMBER id_historico PK
-        NUMBER id_alerta FK
-        NUMBER id_status FK
-        TIMESTAMP data_evento
-        VARCHAR2 observacao
-    }
 ```
 
-## Tabelas principais
+| Relacionamento | Cardinalidade |
+|---|---|
+| `DADO_ORIGEM` → `AREA_PROTEGIDA` | 1:N |
+| `DADO_ORIGEM` → `AREA_DESMATAMENTO` | 1:N |
+| `TIPO_AREA_PROTEGIDA` → `AREA_PROTEGIDA` | 1:N |
+| `AREA_DESMATAMENTO` → `AREA_INTERSECAO` | 1:N |
+| `AREA_PROTEGIDA` → `AREA_INTERSECAO` | 1:N |
 
-| Tabela | Finalidade |
-| --- | --- |
-| `DADO_ORIGEM` | Registra os arquivos GeoJSON fixos processados pelo backend. Pode armazenar áreas protegidas ou áreas de desmatamento. |
-| `AREA_PROTEGIDA` | Guarda as geometrias das áreas restritas/protegidas vindas do GeoJSON. |
-| `AREA_DESMATAMENTO` | Guarda as geometrias das áreas de desmatamento detectadas no momento. |
-| `INTERSECAO_DESMATAMENTO` | Armazena o resultado do cruzamento espacial entre desmatamento e área protegida. |
-| `ALERTA_DESMATAMENTO_ILEGAL` | Registra os casos em que uma área de desmatamento cruza uma área protegida/restrita. |
-| `HISTORICO_ALERTA` | Mantém a evolução temporal do alerta, como aberto, em analise, confirmado ou resolvido. |
+---
 
-## Relacionamentos
+## Pré-requisitos
 
-| Relacionamento | Cardinalidade | Descricao |
-| --- | --- | --- |
-| `DADO_ORIGEM` -> `AREA_PROTEGIDA` | 1:N | Um arquivo GeoJSON de áreas protegidas pode conter varias features. |
-| `DADO_ORIGEM` -> `AREA_DESMATAMENTO` | 1:N | Um arquivo GeoJSON de desmatamento pode conter varias features. |
-| `TIPO_AREA_PROTEGIDA` -> `AREA_PROTEGIDA` | 1:N | Cada área protegida pertence a um tipo ou categoria. |
-| `AREA_DESMATAMENTO` -> `INTERSECAO_DESMATAMENTO` | 1:N | Uma área de desmatamento pode cruzar uma ou mais áreas protegidas. |
-| `AREA_PROTEGIDA` -> `INTERSECAO_DESMATAMENTO` | 1:N | Uma área protegida pode ser atingida por varias áreas de desmatamento. |
-| `INTERSECAO_DESMATAMENTO` -> `ALERTA_DESMATAMENTO_ILEGAL` | 1:1 | Uma intersecao valida gera um alerta de desmatamento ilegal. |
-| `STATUS_ALERTA` -> `ALERTA_DESMATAMENTO_ILEGAL` | 1:N | Cada alerta possui um status atual. |
-| `ALERTA_DESMATAMENTO_ILEGAL` -> `HISTORICO_ALERTA` | 1:N | Cada alerta pode ter varios eventos historicos. |
+- JDK 21
+- Maven 3.9+ (ou o wrapper incluído: `./mvnw` / `.\mvnw.cmd`)
+- Acesso à rede FIAP (presencial ou VPN) para o Oracle
+- Cliente SQL (DBeaver ou SQL Developer)
 
-## Fluxo recomendado
+---
 
-1. O backend Java/Spring le os arquivos GeoJSON fixos do projeto ou de uma pasta configurada.
-2. Para cada arquivo, registra ou atualiza um item em `DADO_ORIGEM`.
-3. Se o arquivo for de áreas protegidas, grava as features em `AREA_PROTEGIDA`.
-4. Se o arquivo for de desmatamento, grava as features em `AREA_DESMATAMENTO`.
-5. O backend calcula a intersecao entre `AREA_DESMATAMENTO.geometria` e `AREA_PROTEGIDA.geometria`.
-6. Cada cruzamento encontrado e salvo em `INTERSECAO_DESMATAMENTO`.
-7. Se a área protegida estiver ativa e for restrita, o sistema cria um registro em `ALERTA_DESMATAMENTO_ILEGAL`.
-8. O React consulta a API Spring para exibir mapa, lista de alertas, filtros por data, risco, UF e status.
+## Configuração
 
-## Observacoes para armazenamento no Oracle
+O perfil ativo padrão é `dev`. As credenciais são lidas de um arquivo de
+ambiente em `config/.env-dev.properties` (não versionado):
 
-- As geometrias devem ser armazenadas como `MDSYS.SDO_GEOMETRY`.
-- O campo `hash_arquivo` ajuda a identificar se o arquivo fixo mudou e evita reprocessamento desnecessario:
-  - 1 = Processado
-  - 0 = Não processado
-- `tipo_conteudo` em `DADO_ORIGEM` pode receber valores como:
-  - `AREA_PROTEGIDA`
-  - `DESMATAMENTO`
-- `restrita` em `TIPO_AREA_PROTEGIDA` pode ser `S` ou `N`.
-- `ativo` em `AREA_DESMATAMENTO` indica se aquele desmatamento ainda esta sendo considerado no monitoramento atual.
-- `ativa` em `AREA_PROTEGIDA` indica se a área protegida ainda deve ser considerada no cruzamento.
-
-## Sugestao de status de alerta
-
-| Status | Descricao |
-| --- | --- |
-| `ABERTO` | Alerta gerado automaticamente apos intersecao com área protegida. |
-| `EM_ANALISE` | Alerta esta sendo analisado. |
-| `CONFIRMADO` | Desmatamento ilegal confirmado. |
-| `DESCARTADO` | Alerta descartado por falso positivo ou inconsistencia nos dados. |
-| `RESOLVIDO` | Caso tratado ou encerrado. |
-
-## Sugestao de indices
-
-```sql
-CREATE INDEX idx_area_protegida_geom
-ON area_protegida(geometria)
-INDEXTYPE IS MDSYS.SPATIAL_INDEX;
-
-CREATE INDEX idx_area_desmatamento_geom
-ON area_desmatamento(geometria)
-INDEXTYPE IS MDSYS.SPATIAL_INDEX;
-
-CREATE INDEX idx_intersecao_geom
-ON intersecao_desmatamento(geometria_intersecao)
-INDEXTYPE IS MDSYS.SPATIAL_INDEX;
-
-CREATE INDEX idx_desmatamento_data
-ON area_desmatamento(data_deteccao);
-
-CREATE INDEX idx_alerta_status
-ON alerta_desmatamento_ilegal(id_status);
-
-CREATE INDEX idx_alerta_data
-ON alerta_desmatamento_ilegal(data_deteccao);
-
-CREATE INDEX idx_historico_alerta
-ON historico_alerta(id_alerta, data_evento);
+```
+ORACLE_DB_URL=jdbc:oracle:thin:@ORACLE.FIAP.COM.BR:1521:ORCL
+ORACLE_DB_USERNAME=<rm_usuario>
+ORACLE_DB_PASSWORD=<senha>
 ```
 
-## Exemplo de regra de alerta
+---
 
-Um alerta de desmatamento ilegal deve ser criado quando:
+## Preparar o banco
 
-```text
-AREA_DESMATAMENTO.geometria intercepta AREA_PROTEGIDA.geometria
-E AREA_PROTEGIDA.ativa = 'S'
-E TIPO_AREA_PROTEGIDA.restrita = 'S'
-E area_intersecao_ha > 0
+Execute na ordem, no DBeaver:
+
+1. **Script de schema** — cria `DADO_ORIGEM`, `TIPO_AREA_PROTEGIDA`,
+   `AREA_PROTEGIDA` e `AREA_DESMATAMENTO`.
+2. **`database/ddl_intersecao.sql`**, executando uma instrução por vez:
+   - **Seção 1** — metadata em `USER_SDO_GEOM_METADATA` e índices espaciais
+     (`MDSYS.SPATIAL_INDEX`, SRID 4674) nas duas tabelas de origem.
+     **Obrigatório**: sem o índice espacial, o cruzamento fica inviável.
+   - **Seção 2** — cria a tabela `AREA_INTERSECAO`.
+
+A carga das geometrias é feita pela ingestão da aplicação (GeoTools).
+Como ela é lenta, **o banco de avaliação já deve ser entregue populado**.
+
+---
+
+## Executar
+
+```
+mvn spring-boot:run
+```
+(ou `.\mvnw.cmd spring-boot:run` no PowerShell)
+
+A aplicação sobe em `http://localhost:8080`.
+
+### Flags de inicialização
+
+| Propriedade | Padrão | Função |
+|---|---|---|
+| `prodes.import-on-startup` | `false` | Lê os GeoPackage de desmatamento de `input/` e grava no banco |
+| `conservation-area.import-on-startup` | `false` | Lê os Shapefile de áreas protegidas de `input/` e grava no banco |
+| `intersecao.materializar-on-startup` | `true` | Recalcula as interseções e grava as novas em `AREA_INTERSECAO` |
+
+Com o banco já carregado, mantenha os dois `import-on-startup` em `false`
+(a ingestão apaga e regrava tudo, e leva muito tempo). A materialização da
+interseção é incremental — só grava pares novos.
+
+---
+
+## Endpoints
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/api/intersecoes` | Devolve as interseções como GeoJSON `FeatureCollection` (geometria em 4326 + atributos), pronto para o Leaflet |
+| `POST` | `/api/intersecoes/recalcular` | Recalcula as interseções sob demanda |
+
+Exemplo de feature retornada:
+
+```json
+{
+  "type": "Feature",
+  "geometry": { "type": "MultiPolygon", "coordinates": [ ... ] },
+  "properties": {
+    "id": 1,
+    "nomeConservacao": "...",
+    "categoria": "...",
+    "municipio": "...",
+    "uf": "PA",
+    "areaIntersecaoHa": 12.34
+  }
+}
 ```
 
-O campo `area_ilegal_ha` em `ALERTA_DESMATAMENTO_ILEGAL` deve receber o valor de `INTERSECAO_DESMATAMENTO.area_intersecao_ha`.
+---
