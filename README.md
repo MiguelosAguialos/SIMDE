@@ -12,7 +12,7 @@ Este repositório contém a aplicação frontend do projeto, desenvolvida com Re
 No diretório raiz do projeto, instale as dependências:
 
 ```bash
-npm install
+npm install --force
 ```
 
 ## Inicialização
