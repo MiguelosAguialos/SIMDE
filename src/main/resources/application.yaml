@@ -20,4 +20,4 @@ spring:
   conservation-area:
     import-on-startup: false
   intersecao:
-    materializar-on-startup: true
+    materializar-on-startup: false
